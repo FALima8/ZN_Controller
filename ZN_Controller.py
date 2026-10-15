@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox
 
 import pandas as pd
 import numpy as np
+from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
@@ -14,6 +15,9 @@ import os
 arquivo_path = ""
 dados = None
 canvas_grafico = None
+K_estimado = None
+L_estimado = None
+T_estimado = None
 degrau = None
 
 # Evita que o Matplotlib tente abrir uma janela própria fora do Tkinter.
@@ -33,6 +37,19 @@ def selecionar_arquivo():
         arquivo_path = caminho
         label_arquivo_valor.config(text=arquivo_path)
 
+
+def modelo_fopdt(t, K, L, T, du):
+    # Modelo de primeira ordem com atraso (FOPDT).
+    # Antes do atraso L a saída fica em zero; depois disso ela cresce exponencialmente.
+    y = np.zeros_like(t, dtype=float)
+
+    for i in range(len(t)):
+        if t[i] >= L:
+            y[i] = K * du * (1 - np.exp(-(t[i] - L) / T))
+        else:
+            y[i] = 0.0
+
+    return y
 
 
 def carregar_dados():
@@ -106,6 +123,67 @@ def carregar_dados():
         )
     except Exception as e:
         messagebox.showerror("Erro", f"Não foi possível carregar o arquivo.\n{e}")
+
+
+def estimar_parametros():
+    global degrau, K_estimado, L_estimado, T_estimado
+
+    try:
+        if dados is None or dados.empty:
+            messagebox.showerror(
+                "Erro", "Carregue os dados antes de estimar os parâmetros."
+            )
+            return
+
+        t = dados["tempo"].values
+        y = dados["saida"].values
+
+        degrau = float(entry_degrau.get().strip().replace(",", "."))
+
+        if degrau == 0:
+            messagebox.showerror("Erro", "A amplitude do degrau não pode ser zero.")
+            return
+
+        # Chutes iniciais para ajudar o ajuste numérico a convergir.
+        K0 = max(float(np.max(y) / degrau), 1e-6)
+        L0 = max(float(t[1]) if len(t) > 1 else 0.1, 0.0)
+        T0 = max(float(t[-1] / 4), 0.1)
+
+        def modelo_para_ajuste(t, K, L, T):
+            return modelo_fopdt(t, K, L, T, degrau)
+
+        # Ajusta K, L e T procurando o modelo que mais se aproxima dos dados medidos.
+        parametros, _ = curve_fit(
+            modelo_para_ajuste,
+            t,
+            y,
+            p0=[K0, L0, T0],
+            bounds=([0, 0, 1e-6], [np.inf, np.inf, np.inf]),
+            maxfev=20000,
+        )
+
+        K_estimado, L_estimado, T_estimado = parametros
+
+        if K_estimado <= 0 or L_estimado <= 0 or T_estimado <= 0:
+            messagebox.showerror("Erro", "Os parâmetros estimados não são válidos.")
+            return
+
+        label_k.config(text=f"{K_estimado:.6g}")
+        label_l.config(text=f"{L_estimado:.6g} s")
+        label_t.config(text=f"{T_estimado:.6g} s")
+
+        plotar_comparacao()
+        messagebox.showinfo("Sucesso", "Parâmetros estimados com sucesso.")
+
+    except ValueError:
+        messagebox.showerror(
+            "Erro",
+            "Digite um valor numérico válido para a amplitude do degrau.",
+        )
+    except Exception as e:
+        messagebox.showerror(
+            "Erro", f"Não foi possível estimar os parâmetros.\n{e}"
+        )
 
 
 def configurar_eixos(ax, x, y1, y2=None, t_ass=None):
@@ -184,6 +262,46 @@ def plotar_dados_amostrados():
 
     configurar_eixos(ax, t, y)
     ax.set_title("Resposta Amostrada da Planta")
+    ax.legend()
+    fig.tight_layout()
+    desenhar_figura(fig)
+
+
+def plotar_comparacao():
+    # Coloca os dados reais e o modelo estimado no mesmo gráfico
+    # para conferir visualmente se o ajuste ficou coerente.
+    if dados is None or dados.empty:
+        return
+
+    if K_estimado is None or L_estimado is None or T_estimado is None:
+        return
+
+    t_dados = dados["tempo"].values
+    y_real = dados["saida"].values
+
+    # Em um sistema de primeira ordem, L + 4T já representa praticamente
+    # toda a região de acomodação da resposta.
+    t_ass = L_estimado + 4.0 * T_estimado
+    t_final = min(float(np.max(t_dados)), float(t_ass + 2.0))
+
+    t_modelo = np.linspace(0, t_final, 1000)
+    y_modelo = modelo_fopdt(
+        t_modelo, K_estimado, L_estimado, T_estimado, degrau
+    )
+
+    fig, ax = plt.subplots(figsize=(7, 4), dpi=100)
+    ax.plot(
+        t_dados,
+        y_real,
+        marker="o",
+        linestyle="",
+        markersize=3,
+        label="Dados amostrados",
+    )
+    ax.plot(t_modelo, y_modelo, linewidth=2.0, label="Modelo ajustado")
+
+    configurar_eixos(ax, t_modelo, y_modelo, y_real, t_ass=t_ass)
+    ax.set_title("Comparação: Dados Amostrados x Modelo Ajustado")
     ax.legend()
     fig.tight_layout()
     desenhar_figura(fig)
@@ -306,6 +424,13 @@ btn_carregar = tk.Button(
 )
 btn_carregar.grid(row=4, column=0, padx=5, pady=10)
 
+btn_estimativa = tk.Button(
+    frame_entrada,
+    text="Estimar Parâmetros",
+    command=estimar_parametros,
+    width=20,
+)
+btn_estimativa.grid(row=4, column=1, padx=5, pady=10)
 
 tk.Label(frame_entrada, text="Status:").grid(
     row=5, column=0, sticky="w", padx=5, pady=5
@@ -318,6 +443,40 @@ label_status_valor = tk.Label(
     justify="left",
 )
 label_status_valor.grid(row=5, column=1, sticky="w", padx=5, pady=5)
+
+# Área de resultados: parâmetros estimados da planta.
+frame_resultados = tk.LabelFrame(
+    frame_esquerda,
+    text="Resultados",
+    padx=10,
+    pady=10,
+)
+frame_resultados.pack(fill="both", expand=True, pady=10)
+
+tk.Label(
+    frame_resultados,
+    text="Parâmetros da planta:",
+    font=("Arial", 11, "bold"),
+).grid(row=0, column=0, sticky="w", pady=(5, 10))
+
+tk.Label(frame_resultados, text="Ganho do processo (K):").grid(
+    row=1, column=0, sticky="w", padx=5, pady=5
+)
+label_k = tk.Label(frame_resultados, text="---")
+label_k.grid(row=1, column=1, sticky="w", padx=5, pady=5)
+
+tk.Label(frame_resultados, text="Atraso (L):").grid(
+    row=2, column=0, sticky="w", padx=5, pady=5
+)
+label_l = tk.Label(frame_resultados, text="---")
+label_l.grid(row=2, column=1, sticky="w", padx=5, pady=5)
+
+tk.Label(frame_resultados, text="Constante de tempo (T):").grid(
+    row=3, column=0, sticky="w", padx=5, pady=5
+)
+label_t = tk.Label(frame_resultados, text="---")
+label_t.grid(row=3, column=1, sticky="w", padx=5, pady=5)
+
 
 # O gráfico ocupa a parte direita da janela.
 frame_grafico = tk.LabelFrame(
