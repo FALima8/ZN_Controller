@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# PyInstaller (o executável é publicado em Releases, não no repositório)
+build/
+dist/
+*.spec
+*.exe
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
