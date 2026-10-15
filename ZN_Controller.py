@@ -172,6 +172,49 @@ def estimar_parametros():
         label_l.config(text=f"{L_estimado:.6g} s")
         label_t.config(text=f"{T_estimado:.6g} s")
 
+        # Com K, L e T estimados, aplicamos diretamente as fórmulas clássicas
+        # de Ziegler-Nichols em malha aberta para P, PI e PID.
+        kp_p = T_estimado / (K_estimado * L_estimado)
+
+        kp_pi = 0.9 * T_estimado / (K_estimado * L_estimado)
+        ti_pi = 3.33 * L_estimado
+
+        kp_pid = 1.2 * T_estimado / (K_estimado * L_estimado)
+        ti_pid = 2.0 * L_estimado
+        td_pid = 0.5 * L_estimado
+
+        texto_parametros = (
+            f"P:    Kp = {kp_p:.6g}"
+            f"\nPI:   Kp = {kp_pi:.6g} | Ti = {ti_pi:.6g} s"
+            f"\nPID:  Kp = {kp_pid:.6g} | Ti = {ti_pid:.6g} s | Td = {td_pid:.6g} s"
+        )
+        label_parametros.config(text=texto_parametros)
+
+        # Deixa os controladores já escritos no formato usado no MATLAB.
+        comando_p = f"Gcp = {kp_p:.6g};"
+        comando_pi = (
+            f"Gcpi = {kp_pi:.6g} * (1 + 1/({ti_pi:.6g}*tf('s')));"
+        )
+        comando_pid = (
+            f"Gcpid = {kp_pid:.6g} * (1 + 1/({ti_pid:.6g}*tf('s')) + "
+            f"{td_pid:.6g}*tf('s'));"
+        )
+
+        entry_matlab_p.config(state="normal")
+        entry_matlab_p.delete(0, tk.END)
+        entry_matlab_p.insert(0, comando_p)
+        entry_matlab_p.config(state="readonly")
+
+        entry_matlab_pi.config(state="normal")
+        entry_matlab_pi.delete(0, tk.END)
+        entry_matlab_pi.insert(0, comando_pi)
+        entry_matlab_pi.config(state="readonly")
+
+        entry_matlab_pid.config(state="normal")
+        entry_matlab_pid.delete(0, tk.END)
+        entry_matlab_pid.insert(0, comando_pid)
+        entry_matlab_pid.config(state="readonly")
+
         plotar_comparacao()
         messagebox.showinfo("Sucesso", "Parâmetros estimados com sucesso.")
 
@@ -328,6 +371,9 @@ def rolar_mouse_linux_baixo(event):
     canvas_principal.yview_scroll(1, "units")
 
 
+def selecionar_tudo_entry(event):
+    event.widget.after(1, lambda: event.widget.select_range(0, tk.END))
+
 
 # Montagem da interface gráfica.
 janela = tk.Tk()
@@ -444,7 +490,7 @@ label_status_valor = tk.Label(
 )
 label_status_valor.grid(row=5, column=1, sticky="w", padx=5, pady=5)
 
-# Área de resultados: parâmetros estimados da planta.
+# Área de resultados: parâmetros da planta, sintonia e comandos do MATLAB.
 frame_resultados = tk.LabelFrame(
     frame_esquerda,
     text="Resultados",
@@ -477,6 +523,60 @@ tk.Label(frame_resultados, text="Constante de tempo (T):").grid(
 label_t = tk.Label(frame_resultados, text="---")
 label_t.grid(row=3, column=1, sticky="w", padx=5, pady=5)
 
+tk.Label(
+    frame_resultados,
+    text="Controladores:",
+    font=("Arial", 11, "bold"),
+).grid(row=4, column=0, sticky="w", pady=(20, 10))
+
+label_parametros = tk.Label(
+    frame_resultados,
+    text="---",
+    justify="left",
+    anchor="w",
+    wraplength=320,
+    font=("Arial", 10),
+)
+label_parametros.grid(
+    row=5,
+    column=0,
+    columnspan=2,
+    sticky="w",
+    padx=5,
+    pady=5,
+)
+
+tk.Label(
+    frame_resultados,
+    text="Comandos MATLAB:",
+    font=("Arial", 11, "bold"),
+).grid(row=7, column=0, sticky="w", pady=(20, 10))
+
+tk.Label(frame_resultados, text="Gcp =").grid(
+    row=8, column=0, sticky="w", padx=5, pady=5
+)
+entry_matlab_p = tk.Entry(frame_resultados, width=55)
+entry_matlab_p.grid(row=8, column=1, sticky="w", padx=5, pady=5)
+
+tk.Label(frame_resultados, text="Gcpi =").grid(
+    row=9, column=0, sticky="w", padx=5, pady=5
+)
+entry_matlab_pi = tk.Entry(frame_resultados, width=55)
+entry_matlab_pi.grid(row=9, column=1, sticky="w", padx=5, pady=5)
+
+tk.Label(frame_resultados, text="Gcpid =").grid(
+    row=10, column=0, sticky="w", padx=5, pady=5
+)
+entry_matlab_pid = tk.Entry(frame_resultados, width=55)
+entry_matlab_pid.grid(row=10, column=1, sticky="w", padx=5, pady=5)
+
+entry_matlab_p.config(state="readonly")
+entry_matlab_pi.config(state="readonly")
+entry_matlab_pid.config(state="readonly")
+
+entry_matlab_p.bind("<Button-1>", selecionar_tudo_entry)
+entry_matlab_pi.bind("<Button-1>", selecionar_tudo_entry)
+entry_matlab_pid.bind("<Button-1>", selecionar_tudo_entry)
 
 # O gráfico ocupa a parte direita da janela.
 frame_grafico = tk.LabelFrame(
